@@ -150,14 +150,19 @@ print(f"AI predicted 21-Day return: {predicted_simple_ret * 100:.2f}%")
 # Visualization time
 os.makedirs("assets", exist_ok=True)
 
-future_days = 60 
-price_lower = current_price * 0.7
-price_higher = current_price * 1.3
+future_days = 60
+
+daily_vol = annualized_predicted_vol / np.sqrt(TRADING_DAYS)
+
+final_expected_price = current_price * np.exp(predicted_daily_drift * future_days)
+final_std = current_price * daily_vol * np.sqrt(future_days)
+price_lower = max(final_expected_price - 4 * final_std, current_price * 0.05)
+price_higher = final_expected_price + 4 * final_std
+
 prices = np.linspace(price_lower, price_higher, 300)
 days = np.arange(1, future_days + 1)
 
-daily_vol = annualized_predicted_vol / np.sqrt(TRADING_DAYS) 
-prob_matrix = np.zeros((len(prices), len(days))) 
+prob_matrix = np.zeros((len(prices), len(days)))
 
 for i, day in enumerate(days):
     expected_price = current_price * np.exp(predicted_daily_drift * day)
