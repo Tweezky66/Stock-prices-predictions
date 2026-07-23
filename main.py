@@ -70,22 +70,30 @@ df["Day_of_week"] = df.index.day_of_week
 df["Month"] = df.index.month
 df["Friday"] = (df.index.day_of_week == 4).astype(int)
 
+CANDIDATE_FEATURES = [
+    'MACD_Norm', 'RSI', 'ATR_Pct', 'BB_PctB', 'SMA_20_dist', 'VWAP_Dist',
+    'Daily_return', 'Volatility_20d', 'Return_Lag_1', 'Return_Lag_2',
+    'Return_Lag_3', 'Day_of_week', 'Month', 'Friday',
+]
+
+CORR_THRESHOLD = 0.85
+
+feature_corr = df[CANDIDATE_FEATURES].corr().abs()
+
+upper_triangle = feature_corr.where(np.triu(np.ones(feature_corr.shape), k=1).astype(bool))
+DROPPED_FEATURES = [col for col in upper_triangle.columns if any(upper_triangle[col] > CORR_THRESHOLD)]
+FEATURE_COLS = [c for c in upper_triangle.columns if c not in DROPPED_FEATURES]
+
+print(f"Dropped col: (|corr| > {CORR_THRESHOLD}): {DROPPED_FEATURES if DROPPED_FEATURES else 'none'}")
+
 # Train phase
-X_full = df.drop(columns=[
-    'Target_Future_Vol',
-    'Target_Future_Return', 
-    'Open', 
-    'High', 
-    'Low', 
-    'Close', 
-    'Volume'
-])
+X_full = df[FEATURE_COLS]
 
 latest_features = X_full.iloc[[-1]]
 
 df_train = df.dropna(subset=['Target_Future_Vol', 'Target_Future_Return'])
 
-X = df_train.drop(columns=['Target_Future_Vol', 'Target_Future_Return', 'Open', 'High', 'Low', 'Close', 'Volume'])
+X = df_train[FEATURE_COLS]
 y_vol = df_train['Target_Future_Vol']
 y_ret = df_train['Target_Future_Return']
 
@@ -123,7 +131,7 @@ vol_mae = mean_absolute_error(y_vol_test, vol_pred_test)
 ret_mae = mean_absolute_error(y_ret_test, ret_pred_test)
 
 
-baseline_vol_pred = X_test['Volatility_20d'].values
+baseline_vol_pred = df_train.loc[X_test.index, 'Volatility_20d'].values
 baseline_ret_pred = np.zeros(len(y_ret_test))
 
 baseline_vol_mae = mean_absolute_error(y_vol_test, baseline_vol_pred)
@@ -131,9 +139,20 @@ baseline_ret_mae = mean_absolute_error(y_ret_test, baseline_ret_pred)
 
 direction_acc = float((np.sign(y_ret_test) == np.sign(ret_pred_test)).mean())
 
+step = HORIZON
+period_returns = y_ret_test.values[::step]
+positions = np.where(ret_pred_test[::step] > 0, 1,  0)
+strategy_returns = positions * period_returns
+
+periods_per_year = TRADING_DAYS / HORIZON
+
+strategy_sharpe = (strategy_returns.mean() / strategy_returns.std()) * np.sqrt(periods_per_year)
+baseline_sharpe = (period_returns.mean() / period_returns.std()) * np.sqrt(periods_per_year)
+
 print(f"Volatility MAE  | model: {vol_mae:.4f}  baseline (20d persistence): {baseline_vol_mae:.4f}  beats baseline: {vol_mae < baseline_vol_mae}")
 print(f"Return MAE      | model: {ret_mae:.4f}  baseline (zero return):    {baseline_ret_mae:.4f}  beats baseline: {ret_mae < baseline_ret_mae}")
 print(f"Return direction accuracy (model): {direction_acc * 100:.1f}%\n")
+print(f"Sharpe ratio: {len(strategy_returns)} non-overlapping {HORIZON}-day periods, 0% risk-free | model: {strategy_sharpe:.2f}  buy-and-hold: {baseline_sharpe:.2f}\n")
 
 predicted_vol = model_vol.predict(latest_features)[0]
 predicted_ret = model_ret.predict(latest_features)[0]
